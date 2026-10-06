@@ -1,6 +1,9 @@
 <?php
+
 session_start();
+
 date_default_timezone_set("America/Toronto");
+
 require_once "config.php";
 
 if (!isset($_SESSION["id"])) {
@@ -11,8 +14,11 @@ if (!isset($_SESSION["id"])) {
 $message = "";
 
 
-/* Emprunter un bien */
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["emprunter"])) {
+// ===============================
+// EMPRUNTER UN BIEN
+// ===============================
+
+if (isset($_POST["emprunter"])) {
 
     $bien_id = $_POST["bien_id"];
     $date_retour = $_POST["date_retour"];
@@ -21,18 +27,17 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["emprunter"])) {
     $aujourd_hui = date("Y-m-d");
     $date_max = date("Y-m-d", strtotime("+30 days"));
 
-    /* Vérifier la date */
     if ($date_retour < $aujourd_hui) {
 
         $message = "La date de retour ne peut pas être dans le passé.";
 
     } elseif ($date_retour > $date_max) {
 
-        $message = "La durée maximale d'un emprunt est de 30 jours.";
+        $message = "Un emprunt ne peut pas dépasser 30 jours.";
 
     } else {
 
-        /* Vérifier si le bien est déjà emprunté */
+        // Vérifier si le bien est déjà emprunté
         $sql = "SELECT id
                 FROM emprunts
                 WHERE bien_id = ?
@@ -41,61 +46,48 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["emprunter"])) {
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$bien_id]);
 
-        $emprunt_existant = $stmt->fetch();
-
-        if ($emprunt_existant) {
+        if ($stmt->fetch()) {
 
             $message = "Ce bien est déjà emprunté.";
 
         } else {
 
-            /* Vérifier que le bien existe */
-            $sql = "SELECT id FROM biens
-                    WHERE id = ? AND actif = 1";
+            // Ajouter l'emprunt
+            $sql = "INSERT INTO emprunts
+                    (bien_id, usager_id, date_emprunt, date_retour_prevu)
+                    VALUES (?, ?, ?, ?)";
 
             $stmt = $pdo->prepare($sql);
-            $stmt->execute([$bien_id]);
 
-            $bien = $stmt->fetch();
+            $stmt->execute([
+                $bien_id,
+                $usager_id,
+                $aujourd_hui,
+                $date_retour
+            ]);
 
-            if (!$bien) {
-
-                $message = "Bien introuvable.";
-
-            } else {
-
-                $sql = "INSERT INTO emprunts
-                        (bien_id, usager_id, date_emprunt, date_retour_prevue)
-                        VALUES (?, ?, CURDATE(), ?)";
-
-                $stmt = $pdo->prepare($sql);
-                $stmt->execute([
-                    $bien_id,
-                    $usager_id,
-                    $date_retour
-                ]);
-
-                $message = "Emprunt effectué avec succès.";
-            }
+            $message = "Emprunt effectué avec succès.";
         }
     }
 }
 
 
-/* Retourner un bien */
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["retourner"])) {
+// ===============================
+// RETOURNER UN BIEN
+// ===============================
 
-    $id = $_POST["id"];
+if (isset($_POST["retourner"])) {
+
+    $emprunt_id = $_POST["id"];
 
     if ($_SESSION["role"] == "admin") {
 
         $sql = "UPDATE emprunts
                 SET date_retour_reelle = CURDATE()
-                WHERE id = ?
-                AND date_retour_reelle IS NULL";
+                WHERE id = ?";
 
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([$id]);
+        $stmt->execute([$emprunt_id]);
 
     } else {
 
@@ -106,58 +98,53 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["retourner"])) {
                 AND date_retour_reelle IS NULL";
 
         $stmt = $pdo->prepare($sql);
+
         $stmt->execute([
-            $id,
+            $emprunt_id,
             $_SESSION["id"]
         ]);
     }
 
-    $message = "Retour effectué.";
+    $message = "Le bien a été retourné.";
 }
 
 
-/* Liste des biens disponibles */
-$sql = "SELECT biens.id, biens.nom
-        FROM biens
-        WHERE biens.actif = 1
-        AND biens.id NOT IN (
-            SELECT bien_id
-            FROM emprunts
-            WHERE date_retour_reelle IS NULL
-        )
-        ORDER BY biens.nom";
+// ===============================
+// BIENS DISPONIBLES
+// ===============================
 
-$biens_disponibles = $pdo->query($sql)->fetchAll();
+$sql = "SELECT b.id, b.nom, b.actif, e.id AS emprunt_id
+        FROM biens b
+        LEFT JOIN emprunts e
+            ON b.id = e.bien_id
+            AND e.date_retour_reelle IS NULL
+        WHERE b.actif = 1
+        
+        ORDER BY b.nom";
+
+$biens = $pdo->query($sql)->fetchAll();
 
 
-/* Liste des emprunts */
-if ($_SESSION["role"] == "admin") {
+// ===============================
+// MES EMPRUNTS
+// ===============================
 
-    $sql = "SELECT emprunts.*,
-                   biens.nom AS bien_nom,
-                   usagers.prenom,
-                   usagers.nom
-            FROM emprunts
-            JOIN biens ON emprunts.bien_id = biens.id
-            JOIN usagers ON emprunts.usager_id = usagers.id
-            ORDER BY emprunts.date_emprunt DESC";
+$sql = "SELECT
+            e.id,
+            e.date_emprunt,
+            e.date_retour_prevu,
+            e.date_retour_reelle,
+            b.nom AS bien
+        FROM emprunts e
+        JOIN biens b ON e.bien_id = b.id
+        WHERE e.usager_id = ?
+        ORDER BY e.date_emprunt DESC";
 
-    $emprunts = $pdo->query($sql)->fetchAll();
+$stmt = $pdo->prepare($sql);
+$stmt->execute([$_SESSION["id"]]);
 
-} else {
+$emprunts = $stmt->fetchAll();
 
-    $sql = "SELECT emprunts.*,
-                   biens.nom AS bien_nom
-            FROM emprunts
-            JOIN biens ON emprunts.bien_id = biens.id
-            WHERE emprunts.usager_id = ?
-            ORDER BY emprunts.date_emprunt DESC";
-
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([$_SESSION["id"]]);
-
-    $emprunts = $stmt->fetchAll();
-}
 ?>
 
 <!DOCTYPE html>
@@ -175,7 +162,7 @@ if ($_SESSION["role"] == "admin") {
 
 <body>
 
-<div class="conteneur">
+<div class="container">
 
     <h1>Emprunts</h1>
 
@@ -186,6 +173,14 @@ if ($_SESSION["role"] == "admin") {
         <a href="biens.php">Biens</a>
 
         <a href="contributions.php">Contributions</a>
+
+        <?php if ($_SESSION["role"] == "admin"): ?>
+
+            <a href="admin.php">Administration</a>
+
+        <?php endif; ?>
+
+        <a href="deconnexion.php">Déconnexion</a>
 
     </p>
 
@@ -201,200 +196,148 @@ if ($_SESSION["role"] == "admin") {
 
     <h2>Emprunter un bien</h2>
 
-    <form method="POST">
+    <?php if (count($biens) == 0): ?>
 
-        <label>Bien :</label>
+        <p>Aucun bien n'est disponible actuellement.</p>
 
-        <select name="bien_id" required>
+    <?php else: ?>
 
-            <option value="">Choisir un bien</option>
+        <form method="POST">
 
-            <?php foreach ($biens_disponibles as $bien): ?>
+            <label>Bien :</label>
 
-                <option value="<?= $bien["id"] ?>">
+            <select name="bien_id" required>
 
-                    <?= htmlspecialchars($bien["nom"]) ?>
+                <option value="">Choisir un bien</option>
 
-                </option>
+                <?php foreach ($biens as $bien): ?>
 
-            <?php endforeach; ?>
+                    <option value="<?= $bien["id"] ?>">
 
-        </select>
+                        <?= htmlspecialchars($bien["nom"]) ?>
 
+                    </option>
 
-        <label>Date de retour prévue :</label>
+                <?php endforeach; ?>
 
-        <input
-            type="date"
-            name="date_retour"
-            min="<?= date("Y-m-d") ?>"
-            max="<?= date("Y-m-d", strtotime("+30 days")) ?>"
-            required
-        >
+            </select>
 
 
-        <button type="submit" name="emprunter">
+            <label>Date de retour prévue :</label>
 
-            Emprunter
+            <input
+                type="date"
+                name="date_retour"
+                min="<?= date("Y-m-d") ?>"
+                max="<?= date("Y-m-d", strtotime("+30 days")) ?>"
+                required
+            >
 
-        </button>
+            <button type="submit" name="emprunter">
 
-    </form>
+                Emprunter
 
+            </button>
 
-    <h2>
+        </form>
 
-        <?php
-
-        if ($_SESSION["role"] == "admin") {
-
-            echo "Tous les emprunts";
-
-        } else {
-
-            echo "Mes emprunts";
-
-        }
-
-        ?>
-
-    </h2>
+    <?php endif; ?>
 
 
-    <table>
+    <h2>Mes emprunts</h2>
 
-        <tr>
+    <?php if (count($emprunts) == 0): ?>
 
-            <th>Bien</th>
+        <p>Vous n'avez aucun emprunt.</p>
 
-            <?php if ($_SESSION["role"] == "admin"): ?>
+    <?php else: ?>
 
-                <th>Utilisateur</th>
-
-            <?php endif; ?>
-
-            <th>Date d'emprunt</th>
-
-            <th>Retour prévu</th>
-
-            <th>Retour réel</th>
-
-            <th>État</th>
-
-            <th>Action</th>
-
-        </tr>
-
-
-        <?php foreach ($emprunts as $emprunt): ?>
+        <table>
 
             <tr>
 
-                <td>
+                <th>Bien</th>
 
-                    <?= htmlspecialchars($emprunt["bien_nom"]) ?>
+                <th>Date d'emprunt</th>
 
-                </td>
+                <th>Retour prévu</th>
 
+                <th>Retour réel</th>
 
-                <?php if ($_SESSION["role"] == "admin"): ?>
-
-                    <td>
-
-                        <?= htmlspecialchars($emprunt["prenom"]) ?>
-
-                        <?= htmlspecialchars($emprunt["nom"]) ?>
-
-                    </td>
-
-                <?php endif; ?>
-
-
-                <td>
-
-                    <?= htmlspecialchars($emprunt["date_emprunt"]) ?>
-
-                </td>
-
-
-                <td>
-
-                    <?= htmlspecialchars($emprunt["date_retour_prevue"]) ?>
-
-                </td>
-
-
-                <td>
-
-                    <?php
-
-                    if ($emprunt["date_retour_reelle"] == null) {
-
-                        echo "-";
-
-                    } else {
-
-                        echo htmlspecialchars(
-                            $emprunt["date_retour_reelle"]
-                        );
-
-                    }
-
-                    ?>
-
-                </td>
-
-
-                <td>
-
-                    <?php if ($emprunt["date_retour_reelle"] == null): ?>
-
-                        <span class="en-cours">
-                            En cours
-                        </span>
-
-                    <?php else: ?>
-
-                        Terminé
-
-                    <?php endif; ?>
-
-                </td>
-
-
-                <td>
-
-                    <?php if ($emprunt["date_retour_reelle"] == null): ?>
-
-                        <form method="POST">
-
-                            <input
-                                type="hidden"
-                                name="id"
-                                value="<?= $emprunt["id"] ?>"
-                            >
-
-                            <button type="submit" name="retourner">
-
-                                Retourner
-
-                            </button>
-
-                        </form>
-
-                    <?php else: ?>
-
-                        -
-
-                    <?php endif; ?>
-
-                </td>
+                <th>Action</th>
 
             </tr>
 
-        <?php endforeach; ?>
 
-    </table>
+            <?php foreach ($emprunts as $emprunt): ?>
+
+                <tr>
+
+                    <td>
+                        <?= htmlspecialchars($emprunt["bien"]) ?>
+                    </td>
+
+                    <td>
+                        <?= htmlspecialchars($emprunt["date_emprunt"]) ?>
+                    </td>
+
+                    <td>
+                        <?= htmlspecialchars($emprunt["date_retour_prevu"]) ?>
+                    </td>
+
+                    <td>
+
+                        <?php if ($emprunt["date_retour_reelle"] == null): ?>
+
+                            <span class="en-cours">
+                                En cours
+                            </span>
+
+                        <?php else: ?>
+
+                            <span class="retourne">
+                                <?= htmlspecialchars($emprunt["date_retour_reelle"]) ?>
+                            </span>
+
+                        <?php endif; ?>
+
+                    </td>
+
+                    <td>
+
+                        <?php if ($emprunt["date_retour_reelle"] == null): ?>
+
+                            <form method="POST">
+
+                                <input
+                                    type="hidden"
+                                    name="id"
+                                    value="<?= $emprunt["id"] ?>"
+                                >
+
+                                <button type="submit" name="retourner">
+
+                                    Retourner
+
+                                </button>
+
+                            </form>
+
+                        <?php else: ?>
+
+                            Déjà retourné
+
+                        <?php endif; ?>
+
+                    </td>
+
+                </tr>
+
+            <?php endforeach; ?>
+
+        </table>
+
+    <?php endif; ?>
 
 </div>
 
