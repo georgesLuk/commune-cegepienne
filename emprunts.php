@@ -160,7 +160,7 @@ $emprunts = $stmt->fetchAll();
 
         <?php if ($_SESSION["role"] == "admin"): ?>
 
-            <a href="admin.php">Administration</a>
+            <a href="usagers.php">Administration</a>
 
         <?php endif; ?>
 

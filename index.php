@@ -33,6 +33,7 @@ if (!isset($_SESSION["id"])) {
         <a href="biens.php">Biens</a>
         <a href="contributions.php">Contributions</a>
         <a href="emprunts.php">Emprunts</a>
+        <a href="modifier_usager.php">Modifier son profil</a>
         
 
         <?php if ($_SESSION["role"] == "admin") { ?>

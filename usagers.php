@@ -456,6 +456,7 @@ $usagers = $pdo->query($sql)->fetchAll();
                     </form>
                 </td>
             </tr>
+           
         <?php endforeach; ?>
 
     </table>
